@@ -1,0 +1,9 @@
+year,origin_country,origin_sector,dest_country,dest_sector,flow_type,value
+2013,FRA,C24A,FRA,C24A,intermediate,100
+2013,DEU,C24A,FRA,C24A,intermediate,50
+2013,FRA,C24A,FRA,C24A,go,500
+2013,FRA,C24A,FRA,C24A,va,200
+2014,FRA,C24A,FRA,C24A,intermediate,120
+2014,DEU,C24A,FRA,C24A,intermediate,60
+2014,FRA,C24A,FRA,C24A,go,520
+2014,FRA,C24A,FRA,C24A,va,210

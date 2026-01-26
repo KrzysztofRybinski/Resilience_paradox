@@ -1,0 +1,25 @@
+[years]
+start = 2016
+end = 2022
+base_start = 2013
+base_end = 2015
+
+[countries]
+include_csv = "config/countries_eu23.csv"
+exclude_iso3 = ["POL", "ROU", "ESP", "SVN"]
+
+[stateaid]
+backend = "playwright"
+headless = true
+max_rows_per_export = 50000
+
+[oecd]
+  [oecd.icio]
+  release = "2025"
+  bundles = ["2011-2015", "2016-2022"]
+
+[paths]
+data_raw = "data/raw"
+data_int = "data/intermediate"
+data_final = "data/final"
+output = "output"
