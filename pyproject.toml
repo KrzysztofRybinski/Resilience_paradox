@@ -1,0 +1,51 @@
+[project]
+name = "resilience-paradox"
+version = "0.1.0"
+description = "EU-only state aid exposure pipeline"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Resilience Paradox"}]
+
+dependencies = [
+  "typer>=0.12",
+  "rich>=13.0",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.2",
+  "tomli>=2.0; python_version<'3.11'",
+  "requests>=2.31",
+  "tenacity>=8.2",
+  "tqdm>=4.66",
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "pyarrow>=15.0",
+  "polars>=0.20",
+  "duckdb>=1.0",
+  "python-dateutil>=2.9",
+  "country_converter>=1.2",
+  "statsmodels>=0.14",
+  "linearmodels>=6.0",
+  "matplotlib>=3.8",
+  "playwright>=1.46",
+]
+
+[project.scripts]
+rp = "resilience_paradox.cli:app"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "pre-commit>=3.7",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+addopts = "-q"
