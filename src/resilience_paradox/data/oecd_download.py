@@ -55,7 +55,7 @@ def _find_bundle_urls(html: str, bundles: list[str]) -> dict[str, str]:
     return urls
 
 
-def download_icio_bundles(config: AppConfig, force: bool = False) -> None:
+def download_icio_bundles(config: AppConfig, refresh: bool = False) -> None:
     logger = setup_logging()
     paths = Paths.from_config(config)
     paths.ensure()
@@ -66,8 +66,9 @@ def download_icio_bundles(config: AppConfig, force: bool = False) -> None:
         bundle: raw_dir / f"ICIO{config.oecd.icio.release}_{bundle}.zip" for bundle in bundles
     }
 
-    # If everything is already present and we're not forcing, do not hit the network.
-    if not force and all(p.exists() for p in destinations.values()):
+    missing_paths = [path for path in destinations.values() if not path.exists()]
+    # If everything is already present and we're not refreshing, do not hit the network.
+    if not refresh and not missing_paths:
         logger.info("All OECD ICIO bundles already exist; skipping download.")
         record_manifest(
             paths,
@@ -82,17 +83,14 @@ def download_icio_bundles(config: AppConfig, force: bool = False) -> None:
     try:
         html = fetch_text(OECD_ICIO_PAGE)
     except Exception as exc:
-        raise RuntimeError(
-            "Failed to fetch OECD ICIO dataset page (may be blocked).\n"
-            "Manual fallback:\n"
-            "  1) Open the OECD ICIO dataset page in a browser.\n"
-            "  2) Download the regular ICIO bundles for the years you need (e.g., 2011-2015, 2016-2022).\n"
-            "  3) Save them under data/raw/oecd_icio/ as:\n"
-            f"       ICIO{config.oecd.icio.release}_2011-2015.zip\n"
-            f"       ICIO{config.oecd.icio.release}_2016-2022.zip\n"
-            "  4) Re-run without --force.\n"
-            f"\nOriginal error: {exc}"
-        ) from exc
+        if missing_paths:
+            missing_list = "\n".join(f"  - {path}" for path in missing_paths)
+            raise RuntimeError(
+                "Failed to fetch OECD ICIO dataset page (may be blocked).\n"
+                "Manual fallback: place the missing ICIO ZIPs at:\n"
+                f"{missing_list}"
+            ) from exc
+        raise
 
     urls = _find_bundle_urls(html, bundles)
     if not urls:
@@ -103,7 +101,7 @@ def download_icio_bundles(config: AppConfig, force: bool = False) -> None:
         )
 
     for bundle, dest in destinations.items():
-        if dest.exists() and not force:
+        if dest.exists() and not refresh:
             logger.info("Bundle %s already exists; skipping", dest.name)
             continue
         url = urls.get(bundle)

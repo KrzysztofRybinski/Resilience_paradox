@@ -93,7 +93,7 @@ def run_all_pipeline(config_path: str, force: bool = False, sample: bool = False
         logger.info("Sample mode: skipping OECD ICIO bundle downloads")
         oecd_download_outputs: list[Path] = []
     else:
-        download_icio_bundles(config, force=force)
+        download_icio_bundles(config, refresh=False)
         oecd_download_outputs = list(paths.oecd_raw_dir().glob("*.zip"))
     record_manifest(paths, payload, "oecd_download", [], oecd_download_outputs)
 

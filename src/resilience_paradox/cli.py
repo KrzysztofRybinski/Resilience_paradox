@@ -77,7 +77,7 @@ def oecd_download(
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     cfg = load_config(config)
-    download_icio_bundles(cfg, force=force)
+    download_icio_bundles(cfg, refresh=force)
 
 
 @oecd_app.command("build-icio-panels")
