@@ -9,7 +9,7 @@ def test_pipeline_sample(monkeypatch, tmp_path):
     paths.ensure()
 
     def mock_download_icio(*args, **kwargs):
-        return None
+        raise AssertionError("download_icio_bundles should not be called in sample mode")
 
     def mock_estimate(*args, **kwargs):
         tables_dir = paths.output / "tables"

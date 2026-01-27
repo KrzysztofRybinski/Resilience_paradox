@@ -89,8 +89,13 @@ def run_all_pipeline(config_path: str, force: bool = False, sample: bool = False
         [paths.data_int / "stateaid_awards.parquet"],
     )
 
-    download_icio_bundles(config, force=force)
-    record_manifest(paths, payload, "oecd_download", [], list(paths.oecd_raw_dir().glob("*.zip")))
+    if sample:
+        logger.info("Sample mode: skipping OECD ICIO bundle downloads")
+        oecd_download_outputs: list[Path] = []
+    else:
+        download_icio_bundles(config, force=force)
+        oecd_download_outputs = list(paths.oecd_raw_dir().glob("*.zip"))
+    record_manifest(paths, payload, "oecd_download", [], oecd_download_outputs)
 
     build_icio_panels(config, force=force, sample=sample)
     record_manifest(
