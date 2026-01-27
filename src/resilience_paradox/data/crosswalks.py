@@ -26,7 +26,7 @@ def load_split_weights(paths: Paths) -> dict[str, dict[str, float]]:
 
 
 def _load_mapping(paths: Paths) -> dict[str, str]:
-    mapping_path = paths.root / "config" / "nace_to_icio50.csv"
+    mapping_path = paths.resolve_project_path("config/nace_to_icio50.csv")
     if not mapping_path.exists():
         return {}
     mapping_df = pd.read_csv(mapping_path, dtype=str)

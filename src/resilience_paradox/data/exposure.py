@@ -52,7 +52,7 @@ def build_exposure(config: AppConfig, force: bool = False, sample: bool = False)
         .rename(columns={"downstream_icio50": "icio50"})
     )
 
-    shocks = load_shocks(paths.root / "config" / "shocks.toml")
+    shocks = load_shocks(paths.resolve_project_path("config/shocks.toml"))
     grouped["post_covid"] = grouped["year"] >= shocks["covid"]["start"]
     grouped["shock_energy"] = grouped["year"].between(
         shocks["energy"]["start"], shocks["energy"]["end"]
@@ -94,7 +94,7 @@ def build_panel(config: AppConfig, force: bool = False, sample: bool = False) ->
         lambda x: pd.NA if pd.isna(x) or x <= 0 else np.log(x)
     )
 
-    shocks = load_shocks(paths.root / "config" / "shocks.toml")
+    shocks = load_shocks(paths.resolve_project_path("config/shocks.toml"))
     df["post_covid"] = df["year"] >= shocks["covid"]["start"]
     df["shock_energy"] = df["year"].between(shocks["energy"]["start"], shocks["energy"]["end"])
 

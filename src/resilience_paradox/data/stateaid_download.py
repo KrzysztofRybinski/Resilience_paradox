@@ -71,7 +71,8 @@ def download_stateaid(config: AppConfig, force: bool = False, sample: bool = Fal
     paths = Paths.from_config(config)
     paths.ensure()
 
-    countries = _load_countries(paths.root / config.countries.include_csv)
+    countries_path = paths.resolve_project_path(config.countries.include_csv)
+    countries = _load_countries(countries_path)
 
     if sample:
         logger.info("Creating sample State aid CSVs")
