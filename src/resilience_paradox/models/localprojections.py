@@ -21,15 +21,23 @@ def estimate_event_study(config: AppConfig, force: bool = False, sample: bool = 
         return
 
     df = read_parquet(paths.data_final / "panel_annual.parquet")
+    df = df[df["year"].between(config.years.start, config.years.end)]
     df = df.sort_values(["country_iso3", "icio50", "year"])
+    df["entity_id"] = df["country_iso3"].astype(str) + "_" + df["icio50"].astype(str)
     df["interaction"] = df["exposure_total"] * df["post_covid"]
 
     rows = []
     for horizon in range(4):
-        df["y_h"] = df.groupby(["country_iso3", "icio50"])["dln_gross_output"].shift(-horizon)
-        sample_df = df.dropna(subset=["y_h"]).set_index(["country_iso3", "icio50", "year"])
+        df["y_h"] = df.groupby(["entity_id"])["dln_gross_output"].shift(-horizon)
+        sample_df = df.dropna(subset=["y_h", "interaction"]).set_index(["entity_id", "year"]).sort_index()
         y = sample_df["y_h"]
-        clusters = sample_df.reset_index()[["country_iso3", "year"]]
+        clusters = pd.DataFrame(
+            {
+                "country_iso3": sample_df["country_iso3"].astype(str),
+                "year": sample_df.index.get_level_values("year"),
+            },
+            index=sample_df.index,
+        )
         model = PanelOLS(
             y,
             sample_df[["interaction"]],

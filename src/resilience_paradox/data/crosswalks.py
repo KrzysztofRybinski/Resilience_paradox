@@ -37,6 +37,11 @@ def map_nace_to_icio50(
     df: pd.DataFrame, weights: dict[str, dict[str, float]], paths: Paths
 ) -> pd.DataFrame:
     mapping = _load_mapping(paths)
+    amount_cols = [
+        col
+        for col in df.columns
+        if col.startswith("aid_amount") and pd.api.types.is_numeric_dtype(df[col])
+    ]
     records = []
     for _, row in df.iterrows():
         nace = str(row.get("nace_code", "")).strip()
@@ -45,7 +50,8 @@ def map_nace_to_icio50(
             for icio, share in weights[key].items():
                 new_row = row.copy()
                 new_row["icio50"] = icio
-                new_row["aid_amount_eur"] = row["aid_amount_eur"] * share
+                for col in amount_cols:
+                    new_row[col] = row[col] * share
                 records.append(new_row)
         elif nace in mapping:
             new_row = row.copy()

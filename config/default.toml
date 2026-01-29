@@ -5,7 +5,7 @@ base_start = 2013
 base_end = 2015
 
 [countries]
-include_csv = "config/countries_eu23.csv"
+include_csv = "config/countries_eu23_plusuk.csv"
 exclude_iso3 = ["POL", "ROU", "ESP", "SVN"]
 
 [stateaid]
@@ -13,10 +13,15 @@ backend = "playwright"
 headless = true
 max_rows_per_export = 50000
 
+[prices]
+# Deflate all EUR values to constant base-year EUR using Eurostat HICP (annual average, all items).
+base_year = 2020
+hicp_geo = "EA19"
+
 [oecd]
-  [oecd.icio]
-  release = "2025"
-  bundles = ["2011-2015", "2016-2022"]
+[oecd.icio]
+release = "2025"
+bundles = ["2011-2015", "2016-2022"]
 
 [paths]
 data_raw = "data/raw"

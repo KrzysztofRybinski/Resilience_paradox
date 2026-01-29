@@ -12,6 +12,71 @@ from resilience_paradox.pipeline import record_manifest
 from resilience_paradox.utils.io import read_parquet, write_csv
 
 
+_LATEX_REPLACEMENTS = {
+    "\\": r"\textbackslash{}",
+    "&": r"\&",
+    "%": r"\%",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "{": r"\{",
+    "}": r"\}",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+}
+
+
+def _escape_latex(value: object) -> str:
+    text = "" if pd.isna(value) else str(value)
+    for needle, repl in _LATEX_REPLACEMENTS.items():
+        text = text.replace(needle, repl)
+    return text
+
+
+def _format_cell(value: object, float_format: str) -> str:
+    if pd.isna(value):
+        return ""
+    if isinstance(value, (int, bool)):
+        return str(int(value))
+    if isinstance(value, float):
+        return float_format % value
+    return _escape_latex(value)
+
+
+def _dataframe_to_simple_latex(
+    df: pd.DataFrame,
+    *,
+    caption: str,
+    label: str,
+    float_format: str = "%.4f",
+    index: bool = False,
+) -> str:
+    frame = df.copy()
+    if index:
+        frame = frame.reset_index()
+
+    cols = [str(c) for c in frame.columns]
+    align = "l" * len(cols)
+
+    lines: list[str] = []
+    lines.append(r"\begin{table}[!htbp]")
+    lines.append(r"\centering")
+    lines.append(rf"\caption{{{_escape_latex(caption)}}}")
+    lines.append(rf"\label{{{_escape_latex(label)}}}")
+    lines.append(rf"\begin{{tabular}}{{{align}}}")
+    lines.append(r"\hline")
+    lines.append(" & ".join(_escape_latex(c) for c in cols) + r" \\")
+    lines.append(r"\hline")
+    for _, row in frame.iterrows():
+        cells = [_format_cell(row[c], float_format) for c in frame.columns]
+        lines.append(" & ".join(cells) + r" \\")
+    lines.append(r"\hline")
+    lines.append(r"\end{tabular}")
+    lines.append(r"\end{table}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def write_regression_table(results: dict, csv_path: Path, tex_path: Path) -> None:
     rows = []
     for name, res in results.items():
@@ -31,7 +96,16 @@ def write_regression_table(results: dict, csv_path: Path, tex_path: Path) -> Non
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     tex_path.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(csv_path, index=False)
-    tex_path.write_text(table.to_latex(index=False, float_format="%.4f", caption="Regression results", label="tab:reg"))
+    tex_path.write_text(
+        _dataframe_to_simple_latex(
+            table,
+            caption="Regression results",
+            label="tab:reg",
+            float_format="%.4f",
+            index=False,
+        ),
+        encoding="utf-8",
+    )
 
 
 def render_all_tables(config: AppConfig, force: bool = False, sample: bool = False) -> None:
@@ -49,7 +123,16 @@ def render_all_tables(config: AppConfig, force: bool = False, sample: bool = Fal
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     output_tex.parent.mkdir(parents=True, exist_ok=True)
     summary.to_csv(output_csv)
-    output_tex.write_text(summary.to_latex(float_format="%.4f", caption="Summary statistics", label="tab:summary"))
+    output_tex.write_text(
+        _dataframe_to_simple_latex(
+            summary,
+            caption="Summary statistics",
+            label="tab:summary",
+            float_format="%.4f",
+            index=True,
+        ),
+        encoding="utf-8",
+    )
     logger.info("Wrote summary stats table")
     record_manifest(
         paths,

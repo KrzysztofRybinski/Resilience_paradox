@@ -30,10 +30,19 @@ def build_upstream_aid_panel(
 
     mapped = map_nace_to_icio50(df, split_weights, paths)
 
+    if "aid_amount_eur_million" in mapped.columns:
+        mapped["aid_amount_eur_million"] = mapped["aid_amount_eur_million"]
+    else:
+        mapped["aid_amount_eur_million"] = mapped["aid_amount_eur"] / 1e6
+
+    if "aid_amount_real_eur_million" not in mapped.columns:
+        mapped["aid_amount_real_eur_million"] = mapped["aid_amount_eur_million"]
+
     grouped = (
         mapped.groupby(["country_iso3", "icio50", "year"], as_index=False)
         .agg(
-            aid_total_eur=("aid_amount_eur", "sum"),
+            aid_total_eur_million=("aid_amount_eur_million", "sum"),
+            aid_total_real_eur_million=("aid_amount_real_eur_million", "sum"),
             n_awards=("award_id", "nunique"),
             n_beneficiaries=("beneficiary_name", "nunique"),
         )
@@ -42,7 +51,7 @@ def build_upstream_aid_panel(
 
     beneficiary_stats = (
         mapped.groupby(["country_iso3", "icio50", "year", "beneficiary_name"], as_index=False)
-        .agg(amount=("aid_amount_eur", "sum"))
+        .agg(amount=("aid_amount_real_eur_million", "sum"))
     )
     concentration = (
         beneficiary_stats.groupby(["country_iso3", "icio50", "year"])  # type: ignore

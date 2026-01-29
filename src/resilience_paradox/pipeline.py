@@ -64,7 +64,7 @@ def run_all_pipeline(config_path: str, force: bool = False, sample: bool = False
     from resilience_paradox.data.stateaid_download import download_stateaid
     from resilience_paradox.data.stateaid_panel import build_upstream_aid_panel
     from resilience_paradox.data.exposure import build_exposure, build_panel
-    from resilience_paradox.models.fe import estimate_main, estimate_shock
+    from resilience_paradox.models.fe import estimate_main, estimate_shock, estimate_robustness
     from resilience_paradox.models.localprojections import estimate_event_study
     from resilience_paradox.models.tables import render_all_tables
     from resilience_paradox.models.figures import render_all_figures
@@ -138,9 +138,13 @@ def run_all_pipeline(config_path: str, force: bool = False, sample: bool = False
         [paths.data_final / "panel_annual.parquet"],
     )
 
-    estimate_main(config, force=force, sample=sample)
-    estimate_shock(config, force=force, sample=sample)
-    estimate_event_study(config, force=force, sample=sample)
+    if sample:
+        logger.info("Sample mode: skipping estimation steps")
+    else:
+        estimate_main(config, force=force, sample=sample)
+        estimate_shock(config, force=force, sample=sample)
+        estimate_robustness(config, force=force, sample=sample)
+        estimate_event_study(config, force=force, sample=sample)
     record_manifest(
         paths,
         payload,
