@@ -15,6 +15,7 @@ from resilience_paradox.data.exposure import build_panel as build_final_panel
 from resilience_paradox.models.fe import estimate_main as run_estimate_main
 from resilience_paradox.models.fe import estimate_shock as run_estimate_shock
 from resilience_paradox.models.fe import estimate_robustness as run_estimate_robustness
+from resilience_paradox.models.fe import estimate_country_effects as run_estimate_country_effects
 from resilience_paradox.models.fe import estimate_currency_sanity as run_estimate_currency_sanity
 from resilience_paradox.models.localprojections import estimate_event_study
 from resilience_paradox.models.tables import render_all_tables
@@ -192,6 +193,17 @@ def estimate_robustness(
 ) -> None:
     cfg = load_config(config)
     run_estimate_robustness(cfg, force=force, sample=sample)
+
+
+@estimate_app.command("country-effects")
+def estimate_country_effects(
+    config: str = typer.Option(..., "--config"),
+    force: bool = typer.Option(False, "--force"),
+    sample: bool = typer.Option(False, "--sample"),
+) -> None:
+    """Estimate H1/H2 slopes separately by country (heterogeneity)."""
+    cfg = load_config(config)
+    run_estimate_country_effects(cfg, force=force, sample=sample)
 
 
 @estimate_app.command("event-study")

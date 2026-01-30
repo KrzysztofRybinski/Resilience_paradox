@@ -515,3 +515,141 @@ def estimate_currency_sanity(config: AppConfig, force: bool = False, sample: boo
         ],
         [output_csv, output_tex],
     )
+
+
+def estimate_country_effects(config: AppConfig, force: bool = False, sample: bool = False) -> None:
+    """Estimate baseline slopes separately by country.
+
+    This is useful to explore heterogeneity in the main hypotheses (H1/H2) across countries.
+    We run within-country sector panels with sector and year fixed effects.
+    """
+
+    logger = setup_logging()
+    paths = Paths.from_config(config)
+    paths.ensure()
+
+    output_csv = paths.output / "tables" / "TableS_country_effects.csv"
+    output_tex = paths.output / "tables" / "TableS_country_effects.tex"
+    if output_csv.exists() and output_tex.exists() and not force:
+        logger.info("Country effects table already exists; skipping.")
+        return
+
+    from resilience_paradox.models.tables import _dataframe_to_simple_latex
+
+    panel = read_parquet(paths.data_final / "panel_annual.parquet")
+    panel = panel[panel["year"].between(config.years.start, config.years.end)]
+    panel = panel.dropna(subset=["dln_gross_output"])
+
+    def _safe_se(res, var: str) -> float:
+        try:
+            cov = res.cov
+            cov_mat = cov.to_numpy() if hasattr(cov, "to_numpy") else np.asarray(cov)
+            cov_mat = 0.5 * (cov_mat + cov_mat.T)
+            names = list(getattr(cov, "index", res.params.index))
+            if var not in names:
+                return float("nan")
+            diag = np.diag(cov_mat)
+            idx = names.index(var)
+            v = float(diag[idx])
+            if not np.isfinite(v) or v < 0:
+                return float("nan")
+            return float(np.sqrt(v))
+        except Exception:
+            return float("nan")
+
+    rows: list[dict[str, object]] = []
+    countries = sorted(panel["country_iso3"].dropna().astype(str).unique().tolist())
+    for country in countries:
+        subset = panel[panel["country_iso3"].astype(str) == country].copy()
+        subset["entity_id"] = subset["icio50"].astype(str)
+        subset = subset.set_index(["entity_id", "year"]).sort_index()
+
+        clusters = pd.DataFrame(
+            {"entity_id": subset.index.get_level_values("entity_id")},
+            index=subset.index,
+        )
+
+        out: dict[str, object] = {
+            "country_iso3": country,
+            "n_obs_total_only": 0,
+            "coef_total_only": np.nan,
+            "se_total_only": np.nan,
+            "p_total_only": np.nan,
+            "n_obs_concentration": 0,
+            "coef_total_ctrl": np.nan,
+            "se_total_ctrl": np.nan,
+            "p_total_ctrl": np.nan,
+            "coef_concentration": np.nan,
+            "se_concentration": np.nan,
+            "p_concentration": np.nan,
+            "error_total_only": "",
+            "error_concentration": "",
+        }
+
+        total_df = subset.dropna(subset=["exposure_total", "dln_gross_output"])
+        out["n_obs_total_only"] = int(total_df.shape[0])
+        if total_df.shape[0]:
+            try:
+                y = total_df["dln_gross_output"]
+                exog = _ensure_full_rank(total_df[["exposure_total"]], logger)
+                entity_effects, time_effects = _select_fe_flags(total_df, list(exog.columns), logger)
+                res = PanelOLS(
+                    y,
+                    exog,
+                    entity_effects=entity_effects,
+                    time_effects=time_effects,
+                    drop_absorbed=True,
+                ).fit(cov_type="clustered", clusters=clusters.loc[total_df.index])
+                out["coef_total_only"] = float(res.params.get("exposure_total", np.nan))
+                out["se_total_only"] = _safe_se(res, "exposure_total")
+                out["p_total_only"] = float(getattr(res, "pvalues", {}).get("exposure_total", np.nan))
+            except Exception as exc:
+                out["error_total_only"] = str(exc)
+
+        conc_df = subset.dropna(subset=["exposure_total", "exposure_conc", "dln_gross_output"])
+        out["n_obs_concentration"] = int(conc_df.shape[0])
+        if conc_df.shape[0]:
+            try:
+                y = conc_df["dln_gross_output"]
+                exog = _ensure_full_rank(conc_df[["exposure_total", "exposure_conc"]], logger)
+                entity_effects, time_effects = _select_fe_flags(conc_df, list(exog.columns), logger)
+                res = PanelOLS(
+                    y,
+                    exog,
+                    entity_effects=entity_effects,
+                    time_effects=time_effects,
+                    drop_absorbed=True,
+                ).fit(cov_type="clustered", clusters=clusters.loc[conc_df.index])
+                out["coef_total_ctrl"] = float(res.params.get("exposure_total", np.nan))
+                out["se_total_ctrl"] = _safe_se(res, "exposure_total")
+                out["p_total_ctrl"] = float(getattr(res, "pvalues", {}).get("exposure_total", np.nan))
+                out["coef_concentration"] = float(res.params.get("exposure_conc", np.nan))
+                out["se_concentration"] = _safe_se(res, "exposure_conc")
+                out["p_concentration"] = float(getattr(res, "pvalues", {}).get("exposure_conc", np.nan))
+            except Exception as exc:
+                out["error_concentration"] = str(exc)
+
+        rows.append(out)
+
+    results = pd.DataFrame(rows).sort_values("country_iso3")
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    output_tex.parent.mkdir(parents=True, exist_ok=True)
+    results.to_csv(output_csv, index=False)
+    output_tex.write_text(
+        _dataframe_to_simple_latex(
+            results,
+            caption="Country-specific slopes (baseline and concentration specifications)",
+            label="tab:country_effects",
+            float_format="%.4f",
+            index=False,
+        ),
+        encoding="utf-8",
+    )
+    logger.info("Wrote country effects table to %s", output_csv)
+    record_manifest(
+        paths,
+        config.model_dump(),
+        "estimate_country_effects",
+        [paths.data_final / "panel_annual.parquet"],
+        [output_csv, output_tex],
+    )

@@ -231,6 +231,69 @@ def _save_exposure_coverage_by_year(exposure: pd.DataFrame, path: Path) -> pd.Da
     return yearly
 
 
+def _save_country_effects_by_country(df: pd.DataFrame, path: Path) -> None:
+    """Forest plot of country-specific coefficients for H1/H2."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    needed = {
+        "country_iso3",
+        "coef_total_only",
+        "se_total_only",
+        "coef_concentration",
+        "se_concentration",
+    }
+    missing = needed - set(df.columns)
+    if missing:
+        raise RuntimeError(f"Country-effects table missing columns for plotting: {sorted(missing)}")
+
+    plot_df = df.copy()
+    plot_df["country_iso3"] = plot_df["country_iso3"].astype(str)
+    plot_df = plot_df.sort_values("country_iso3")
+
+    countries = plot_df["country_iso3"].tolist()
+    y_pos = np.arange(len(countries))
+
+    height = max(6.0, 0.32 * len(countries))
+    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(14, height), sharey=True)
+
+    specs = [
+        ("coef_total_only", "se_total_only", "H1: exposure_total (total-only)"),
+        ("coef_concentration", "se_concentration", "H2: exposure_conc (controls for total)"),
+    ]
+    for ax, (coef_col, se_col, title) in zip(axes, specs):
+        coef = pd.to_numeric(plot_df[coef_col], errors="coerce")
+        se = pd.to_numeric(plot_df[se_col], errors="coerce")
+        mask = coef.notna()
+        mask_ci = mask & se.notna() & (se >= 0)
+
+        # With CI where available
+        if mask_ci.any():
+            ax.errorbar(
+                coef[mask_ci],
+                y_pos[mask_ci.to_numpy()],
+                xerr=1.96 * se[mask_ci],
+                fmt="o",
+                color="tab:blue",
+                ecolor="lightgray",
+                elinewidth=1,
+                capsize=2,
+            )
+        # Points without CI (e.g., non-PSD covariance or estimation failure)
+        if (mask & ~mask_ci).any():
+            ax.scatter(coef[mask & ~mask_ci], y_pos[(mask & ~mask_ci).to_numpy()], color="tab:blue", s=20)
+
+        ax.axvline(0, color="black", linestyle="--", linewidth=1)
+        ax.set_title(title)
+        ax.set_xlabel("Coefficient")
+
+    axes[0].set_yticks(y_pos)
+    axes[0].set_yticklabels(countries, fontsize=9)
+    axes[0].invert_yaxis()
+    fig.suptitle("Country-specific coefficients (with 95% CI when available)", y=0.995)
+    fig.tight_layout(rect=[0, 0.02, 1, 0.98])
+    fig.savefig(path)
+    plt.close(fig)
+
+
 def render_all_figures(config: AppConfig, force: bool = False, sample: bool = False) -> None:
     logger = setup_logging()
     paths = Paths.from_config(config)
@@ -245,9 +308,11 @@ def render_all_figures(config: AppConfig, force: bool = False, sample: bool = Fa
     fig_s1 = paths.output / "figures" / "FigureS1_stateaid_local_vs_eur_by_country.png"
     fig_s2 = paths.output / "figures" / "FigureS2_stateaid_naive_vs_converted_totals.png"
     fig_s3 = paths.output / "figures" / "FigureS3_exposure_coverage_by_year.png"
+    fig_s4 = paths.output / "figures" / "FigureS4_country_effects.png"
 
     diag_totals_csv = paths.output / "tables" / "stateaid_country_year_totals_naive_vs_converted.csv"
     diag_exposure_csv = paths.output / "tables" / "exposure_total_coverage_by_year.csv"
+    country_effects_csv = paths.output / "tables" / "TableS_country_effects.csv"
 
     if not fig1.exists() or force:
         _save_hist(aid_panel["hhi_beneficiary"], fig1, "Aid concentration (HHI)")
@@ -303,11 +368,18 @@ def render_all_figures(config: AppConfig, force: bool = False, sample: bool = Fa
                 yearly = _save_exposure_coverage_by_year(exposure, fig_s3)
                 write_csv(yearly, diag_exposure_csv)
 
+    if country_effects_csv.exists() and (not fig_s4.exists() or force):
+        try:
+            df = pd.read_csv(country_effects_csv)
+            _save_country_effects_by_country(df, fig_s4)
+        except Exception as exc:
+            logger.warning("Failed to render country-effects figure (%s): %s", country_effects_csv, exc)
+
     logger.info("Rendered figures")
     record_manifest(
         paths,
         config.model_dump(),
         "render_figures",
         [paths.data_final / "upstream_aid_panel.parquet", paths.data_int / "stateaid_awards.parquet"],
-        [fig1, fig2, fig3, fig_s1, fig_s2, fig_s3, diag_totals_csv, diag_exposure_csv],
+        [fig1, fig2, fig3, fig_s1, fig_s2, fig_s3, fig_s4, diag_totals_csv, diag_exposure_csv, country_effects_csv],
     )
