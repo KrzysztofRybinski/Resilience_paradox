@@ -241,6 +241,9 @@ def clean_stateaid(config: AppConfig, force: bool = False, sample: bool = False)
             year_start = int(config.years.start)
             year_end = int(config.years.end)
 
+            checks_dir = paths.data_int / "stateaid_checks"
+            checks_dir.mkdir(parents=True, exist_ok=True)
+
             award_id_expr = (
                 "COALESCE("
                 "NULLIF(ref_no, ''), "
@@ -250,6 +253,192 @@ def clean_stateaid(config: AppConfig, force: bool = False, sample: bool = False)
                 ")"
             )
 
+            # Report missing conversion factors (do not drop rows).
+            missing_fx_path = checks_dir / "missing_fx_rates.csv"
+            missing_deflator_path = checks_dir / "missing_hicp_deflator_years.csv"
+            missing_fx_escaped = str(missing_fx_path).replace("'", "''")
+            missing_deflator_escaped = str(missing_deflator_path).replace("'", "''")
+            currency_rows_path = checks_dir / "currency_rows_pre_conversion.csv"
+            currency_rows_escaped = str(currency_rows_path).replace("'", "''")
+            conversion_summary_path = checks_dir / "currency_conversion_summary.csv"
+            conversion_summary_escaped = str(conversion_summary_path).replace("'", "''")
+
+            diagnostic_base = f"""
+            WITH base AS (
+              SELECT
+                r.country_iso3,
+                r.year,
+                COALESCE(NULLIF(upper(trim(r.currency)), ''), 'EUR') AS aid_currency,
+                coalesce(r.aid_element_amount, r.nominal_amount) AS amount
+              FROM stateaid_portal_norm r
+              WHERE r.country_iso3 IS NOT NULL
+                AND r.country_iso3 NOT IN ({excluded_sql})
+                AND r.year BETWEEN {year_start} AND {year_end}
+                AND r.granting_date IS NOT NULL
+                AND coalesce(r.aid_element_amount, r.nominal_amount) IS NOT NULL
+            )
+            """
+
+            currency_totals = con.execute(
+                f"""
+                {diagnostic_base}
+                SELECT
+                  aid_currency AS currency,
+                  COUNT(*) AS rows
+                FROM base
+                GROUP BY 1
+                ORDER BY rows DESC
+                """
+            ).fetchdf()
+            if not currency_totals.empty:
+                logger.info(
+                    "State aid rows by original currency (pre-conversion, non-null amounts):\n%s",
+                    currency_totals.to_string(index=False),
+                )
+
+            ltl_rows = con.execute(
+                f"""
+                {diagnostic_base}
+                SELECT COUNT(*) FROM base WHERE aid_currency = 'LTL'
+                """
+            ).fetchone()[0]
+            if ltl_rows:
+                logger.info(
+                    "Detected %s State Aid rows with currency LTL. Conversion uses the fixed irrevocable rate 1 EUR = 3.45280 LTL.",
+                    ltl_rows,
+                )
+
+            con.execute(
+                f"""
+                COPY (
+                  {diagnostic_base}
+                  SELECT
+                    year,
+                    aid_currency AS currency,
+                    COUNT(*) AS rows
+                  FROM base
+                  GROUP BY 1,2
+                  ORDER BY 1,2
+                ) TO '{currency_rows_escaped}' (HEADER, DELIMITER ',')
+                """
+            )
+
+            total_rows, eur_rows, local_rows, converted_local_rows, missing_fx_preview = con.execute(
+                f"""
+                {diagnostic_base}
+                SELECT
+                  COUNT(*) AS rows_total,
+                  SUM(CASE WHEN aid_currency = 'EUR' THEN 1 ELSE 0 END) AS rows_eur_currency,
+                  SUM(CASE WHEN aid_currency <> 'EUR' THEN 1 ELSE 0 END) AS rows_local_currency,
+                  SUM(CASE WHEN aid_currency <> 'EUR' AND fx.rate_per_eur IS NOT NULL THEN 1 ELSE 0 END) AS rows_converted_from_local_currency,
+                  SUM(CASE WHEN fx.rate_per_eur IS NULL THEN 1 ELSE 0 END) AS rows_missing_fx
+                FROM base
+                LEFT JOIN fx_annual fx
+                  ON fx.year = base.year
+                 AND fx.currency = base.aid_currency
+                """
+            ).fetchone()
+            rows_with_eur_amount = int(total_rows) - int(missing_fx_preview)
+
+            con.execute(
+                f"""
+                COPY (
+                  {diagnostic_base}
+                  SELECT
+                    COUNT(*) AS rows_total,
+                    SUM(CASE WHEN aid_currency = 'EUR' THEN 1 ELSE 0 END) AS rows_eur_currency,
+                    SUM(CASE WHEN aid_currency <> 'EUR' THEN 1 ELSE 0 END) AS rows_local_currency,
+                    SUM(CASE WHEN aid_currency <> 'EUR' AND fx.rate_per_eur IS NOT NULL THEN 1 ELSE 0 END) AS rows_converted_from_local_currency,
+                    SUM(CASE WHEN fx.rate_per_eur IS NULL THEN 1 ELSE 0 END) AS rows_missing_fx,
+                    SUM(CASE WHEN h.deflator_to_base IS NULL THEN 1 ELSE 0 END) AS rows_missing_deflator
+                  FROM base
+                  LEFT JOIN fx_annual fx
+                    ON fx.year = base.year
+                   AND fx.currency = base.aid_currency
+                  LEFT JOIN hicp_deflator h
+                    ON h.year = base.year
+                ) TO '{conversion_summary_escaped}' (HEADER, DELIMITER ',')
+                """
+            )
+
+            logger.info(
+                "State aid conversion coverage: local-currency rows=%s; converted from local=%s; total rows with EUR amount=%s/%s. Reports: %s, %s",
+                int(local_rows),
+                int(converted_local_rows),
+                rows_with_eur_amount,
+                int(total_rows),
+                currency_rows_path,
+                conversion_summary_path,
+            )
+
+            missing_fx_count = con.execute(
+                f"""
+                {diagnostic_base}
+                SELECT COUNT(*) FROM base
+                LEFT JOIN fx_annual fx
+                  ON fx.year = base.year
+                 AND fx.currency = base.aid_currency
+                WHERE fx.rate_per_eur IS NULL
+                """
+            ).fetchone()[0]
+
+            missing_deflator_count = con.execute(
+                f"""
+                {diagnostic_base}
+                SELECT COUNT(*) FROM base
+                LEFT JOIN hicp_deflator h
+                  ON h.year = base.year
+                WHERE h.deflator_to_base IS NULL
+                """
+            ).fetchone()[0]
+
+            con.execute(
+                f"""
+                COPY (
+                  {diagnostic_base}
+                  SELECT
+                    base.year,
+                    aid_currency AS currency,
+                    COUNT(*) AS rows
+                  FROM base
+                  LEFT JOIN fx_annual fx
+                    ON fx.year = base.year
+                   AND fx.currency = base.aid_currency
+                  WHERE fx.rate_per_eur IS NULL
+                  GROUP BY 1,2
+                  ORDER BY 1,2
+                ) TO '{missing_fx_escaped}' (HEADER, DELIMITER ',')
+                """
+            )
+
+            con.execute(
+                f"""
+                COPY (
+                  {diagnostic_base}
+                  SELECT
+                    base.year,
+                    COUNT(*) AS rows
+                  FROM base
+                  LEFT JOIN hicp_deflator h
+                    ON h.year = base.year
+                  WHERE h.deflator_to_base IS NULL
+                  GROUP BY 1
+                  ORDER BY 1
+                ) TO '{missing_deflator_escaped}' (HEADER, DELIMITER ',')
+                """
+            )
+
+            if missing_fx_count or missing_deflator_count:
+                raise RuntimeError(
+                    "Missing FX rates and/or HICP deflators for some State Aid rows. "
+                    "I will not silently drop or zero-out these awards. "
+                    "See:\n"
+                    f"  - {missing_fx_path}\n"
+                    f"  - {missing_deflator_path}\n"
+                    "Fix by running `rp prices download --force` (ECB FX + Eurostat HICP) "
+                    "or manually providing the missing series, then rerun `rp stateaid clean --force`."
+                )
+
             query = f"""
             SELECT
               award_id,
@@ -257,6 +446,12 @@ def clean_stateaid(config: AppConfig, force: bool = False, sample: bool = False)
               granting_date,
               year,
               beneficiary_name,
+              aid_amount_original,
+              aid_amount_source,
+              fx_rate_per_eur,
+              deflator_to_base,
+              missing_fx,
+              missing_deflator,
               aid_amount_eur,
               aid_amount_real_eur,
               aid_amount_eur_million,
@@ -273,13 +468,34 @@ def clean_stateaid(config: AppConfig, force: bool = False, sample: bool = False)
                 {award_id_expr} AS award_id,
                 country_iso3,
                 granting_date,
-                year,
+                r.year AS year,
                 beneficiary_name,
                 COALESCE(NULLIF(upper(trim(r.currency)), ''), 'EUR') AS aid_currency,
-                (coalesce(r.aid_element_amount, r.nominal_amount) / fx.rate_per_eur) AS aid_amount_eur,
-                ((coalesce(r.aid_element_amount, r.nominal_amount) / fx.rate_per_eur) * h.deflator_to_base) AS aid_amount_real_eur,
-                ((coalesce(r.aid_element_amount, r.nominal_amount) / fx.rate_per_eur) / 1e6) AS aid_amount_eur_million,
-                (((coalesce(r.aid_element_amount, r.nominal_amount) / fx.rate_per_eur) * h.deflator_to_base) / 1e6) AS aid_amount_real_eur_million,
+                coalesce(r.aid_element_amount, r.nominal_amount) AS aid_amount_original,
+                CASE
+                  WHEN r.aid_element_amount IS NOT NULL THEN 'aid_element'
+                  ELSE 'nominal'
+                END AS aid_amount_source,
+                fx.rate_per_eur AS fx_rate_per_eur,
+                h.deflator_to_base AS deflator_to_base,
+                fx.rate_per_eur IS NULL AS missing_fx,
+                h.deflator_to_base IS NULL AS missing_deflator,
+                CASE
+                  WHEN fx.rate_per_eur IS NULL THEN NULL
+                  ELSE (coalesce(r.aid_element_amount, r.nominal_amount) / fx.rate_per_eur)
+                END AS aid_amount_eur,
+                CASE
+                  WHEN fx.rate_per_eur IS NULL OR h.deflator_to_base IS NULL THEN NULL
+                  ELSE ((coalesce(r.aid_element_amount, r.nominal_amount) / fx.rate_per_eur) * h.deflator_to_base)
+                END AS aid_amount_real_eur,
+                CASE
+                  WHEN fx.rate_per_eur IS NULL THEN NULL
+                  ELSE ((coalesce(r.aid_element_amount, r.nominal_amount) / fx.rate_per_eur) / 1e6)
+                END AS aid_amount_eur_million,
+                CASE
+                  WHEN fx.rate_per_eur IS NULL OR h.deflator_to_base IS NULL THEN NULL
+                  ELSE (((coalesce(r.aid_element_amount, r.nominal_amount) / fx.rate_per_eur) * h.deflator_to_base) / 1e6)
+                END AS aid_amount_real_eur_million,
                 aid_instrument,
                 aid_objective,
                 COALESCE(sector_to_nace.nace_code, '') AS nace_code,
@@ -303,8 +519,6 @@ def clean_stateaid(config: AppConfig, force: bool = False, sample: bool = False)
                 AND r.year BETWEEN {year_start} AND {year_end}
                 AND r.granting_date IS NOT NULL
                 AND coalesce(r.aid_element_amount, r.nominal_amount) IS NOT NULL
-                AND fx.rate_per_eur IS NOT NULL
-                AND h.deflator_to_base IS NOT NULL
             ) t
             WHERE rn = 1
             """
@@ -315,6 +529,7 @@ def clean_stateaid(config: AppConfig, force: bool = False, sample: bool = False)
             con.close()
 
         logger.info("Wrote cleaned state aid awards to %s", output_path)
+        logger.info("Wrote FX/HICP missingness reports to %s", paths.data_int / "stateaid_checks")
         record_manifest(
             paths,
             config.model_dump(),

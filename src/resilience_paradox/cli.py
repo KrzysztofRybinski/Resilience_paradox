@@ -15,6 +15,7 @@ from resilience_paradox.data.exposure import build_panel as build_final_panel
 from resilience_paradox.models.fe import estimate_main as run_estimate_main
 from resilience_paradox.models.fe import estimate_shock as run_estimate_shock
 from resilience_paradox.models.fe import estimate_robustness as run_estimate_robustness
+from resilience_paradox.models.fe import estimate_currency_sanity as run_estimate_currency_sanity
 from resilience_paradox.models.localprojections import estimate_event_study
 from resilience_paradox.models.tables import render_all_tables
 from resilience_paradox.models.figures import render_all_figures
@@ -191,6 +192,31 @@ def estimate_robustness(
 ) -> None:
     cfg = load_config(config)
     run_estimate_robustness(cfg, force=force, sample=sample)
+
+
+@estimate_app.command("event-study")
+def estimate_eventstudy(
+    config: str = typer.Option(..., "--config"),
+    force: bool = typer.Option(False, "--force"),
+    sample: bool = typer.Option(False, "--sample"),
+) -> None:
+    """Estimate local-projection / event-study coefficients for Figure 3."""
+    cfg = load_config(config)
+    estimate_event_study(cfg, force=force, sample=sample)
+
+
+@estimate_app.command("currency-sanity")
+def estimate_currency_sanity(
+    config: str = typer.Option(..., "--config"),
+    force: bool = typer.Option(False, "--force"),
+    sample: bool = typer.Option(False, "--sample"),
+) -> None:
+    """Estimate a diagnostic spec that treats local-currency aid as EUR.
+
+    This is a sanity check to explain why coefficients can change once FX conversion is applied.
+    """
+    cfg = load_config(config)
+    run_estimate_currency_sanity(cfg, force=force, sample=sample)
 
 
 @prices_app.command("download")

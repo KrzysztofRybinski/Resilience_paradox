@@ -38,20 +38,24 @@ def build_upstream_aid_panel(
     if "aid_amount_real_eur_million" not in mapped.columns:
         mapped["aid_amount_real_eur_million"] = mapped["aid_amount_eur_million"]
 
+    def _sum_or_na(values: pd.Series) -> float:
+        return float(values.sum(min_count=1))  # type: ignore[arg-type]
+
     grouped = (
         mapped.groupby(["country_iso3", "icio50", "year"], as_index=False)
         .agg(
-            aid_total_eur_million=("aid_amount_eur_million", "sum"),
-            aid_total_real_eur_million=("aid_amount_real_eur_million", "sum"),
+            aid_total_eur_million=("aid_amount_eur_million", _sum_or_na),
+            aid_total_real_eur_million=("aid_amount_real_eur_million", _sum_or_na),
             n_awards=("award_id", "nunique"),
             n_beneficiaries=("beneficiary_name", "nunique"),
+            n_rows_missing_real_eur=("aid_amount_real_eur_million", lambda s: int(s.isna().sum())),
         )
         .copy()
     )
 
     beneficiary_stats = (
         mapped.groupby(["country_iso3", "icio50", "year", "beneficiary_name"], as_index=False)
-        .agg(amount=("aid_amount_real_eur_million", "sum"))
+        .agg(amount=("aid_amount_real_eur_million", _sum_or_na))
     )
     concentration = (
         beneficiary_stats.groupby(["country_iso3", "icio50", "year"])  # type: ignore

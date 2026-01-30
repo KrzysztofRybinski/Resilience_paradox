@@ -67,15 +67,35 @@ def build_exposure(config: AppConfig, force: bool = False, sample: bool = False)
     exposure["exposure_conc"] = exposure["ioshare_base"] * exposure["hhi_beneficiary"]
     exposure["exposure_aidlevel"] = exposure["ioshare_base"] * exposure["aid_total_real_eur_million"]
 
+    def _sum_or_na(values: pd.Series) -> float:
+        return float(values.sum(min_count=1))  # type: ignore[arg-type]
+
     grouped = (
         exposure.groupby(["country_iso3", "downstream_icio50", "year"], as_index=False)
         .agg(
-            exposure_total=("exposure_total", "sum"),
-            exposure_conc=("exposure_conc", "sum"),
-            exposure_aidlevel=("exposure_aidlevel", "sum"),
+            exposure_total=("exposure_total", _sum_or_na),
+            exposure_conc=("exposure_conc", _sum_or_na),
+            exposure_aidlevel=("exposure_aidlevel", _sum_or_na),
         )
         .rename(columns={"downstream_icio50": "icio50"})
     )
+
+    non_null = grouped["exposure_total"].dropna()
+    if non_null.empty:
+        raise RuntimeError(
+            "Exposure panel has no non-missing exposure values. "
+            "This usually means upstream aid amounts could not be converted to real EUR "
+            "(missing FX/HICP) or did not map to ICIO sectors. "
+            "Check reports in data/intermediate/stateaid_checks/ and rerun `rp prices download` "
+            "and `rp stateaid clean`."
+        )
+    if non_null.nunique() <= 1:
+        raise RuntimeError(
+            "Exposure panel regressor exposure_total has no variation. "
+            "This usually happens when upstream aid totals are all 0/NA after conversion. "
+            "Check reports in data/intermediate/stateaid_checks/ and the upstream aid panel at "
+            "data/final/upstream_aid_panel.parquet."
+        )
 
     shocks = load_shocks(paths.resolve_project_path("config/shocks.toml"))
     grouped["post_covid"] = grouped["year"] >= shocks["covid"]["start"]

@@ -8,13 +8,15 @@ import pandas as pd
 def gini(values: pd.Series) -> float:
     array = values.dropna().to_numpy(dtype=float)
     if array.size == 0:
-        return 0.0
+        return float("nan")
     array = np.sort(array)
     index = np.arange(1, array.size + 1)
     return (np.sum((2 * index - array.size - 1) * array)) / (array.size * np.sum(array))
 
 
 def hhi(values: pd.Series) -> float:
+    if values.dropna().empty:
+        return float("nan")
     total = values.sum()
     if total == 0:
         return 0.0
